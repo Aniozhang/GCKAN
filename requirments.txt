@@ -1,0 +1,6 @@
+pykan
+torch
+scipy
+numpy
+pygame
+torch-geometric
