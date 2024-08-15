@@ -7,10 +7,10 @@ from tqdm import tqdm
 import torch.nn as nn
 
 # Import the new GATEncoder and GATDecoder classes
-from autoencoder import GATEncoder, GATDecoder, GraphAutoencoder
+from GCNautoencoder import GCNEncoder, GCNDecoder, GraphAutoencoder
 
 # Load the dataset
-graph_dataset = torch.load("../Dataset/graph_dataset.pt")
+graph_dataset = torch.load("../Dataset/graph_dataset_naive.pt")
 
 # Split dataset into train, validation, and test sets
 train_val_data, test_data = train_test_split(graph_dataset, test_size=0.2, random_state=42)
@@ -66,7 +66,7 @@ hyperparameters = product(hidden_channels_range, learning_rate_range, weight_dec
 
 # Create a directory to save models and results
 os.makedirs("../models", exist_ok=True)
-results_file = "../models/results.json"
+results_file = "../models/resultsNaive.json"
 
 # Load existing results if the file exists
 if os.path.exists(results_file):
@@ -75,6 +75,15 @@ if os.path.exists(results_file):
 else:
     results = []
 
+
+class RMSELoss(nn.Module):
+    def __init__(self):
+        super(RMSELoss, self).__init__()
+        self.mse_loss = nn.MSELoss()
+
+    def forward(self, y_pred, y_true):
+        return torch.sqrt(self.mse_loss(y_pred, y_true))
+
 for hidden_channels, lr, wd, vectorSize in hyperparameters:
     # Define model, optimizer, and loss function
     encoder = GATEncoder(in_channels=4, hidden_channels=hidden_channels, out_channels=vectorSize)
@@ -82,7 +91,7 @@ for hidden_channels, lr, wd, vectorSize in hyperparameters:
     model = GraphAutoencoder(encoder, decoder)
 
     optimizer = torch.optim.Adam(model.parameters(), lr=lr, weight_decay=wd)
-    criterion = nn.MSELoss()
+    criterion = RMSELoss()
 
     # Track losses for each epoch
     train_losses = []
@@ -101,7 +110,7 @@ for hidden_channels, lr, wd, vectorSize in hyperparameters:
         if val_loss < best_val_loss or (epoch + 1) % saveEpochOn == 0:
             if val_loss < best_val_loss:
                 best_val_loss = val_loss
-            best_model_path = f"../models/model_h{hidden_channels}_lr{lr}_vec{vectorSize}_wd{wd}_e{epoch+1}.pt"
+            best_model_path = f"../models/model_h{hidden_channels}_lr{lr}_vec{vectorSize}_wd{wd}_e{epoch+1}naive.pt"
             torch.save(model.state_dict(), best_model_path)
     
     # Test the model
