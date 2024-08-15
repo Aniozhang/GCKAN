@@ -11,8 +11,8 @@ from torch_geometric.utils import dense_to_sparse
 from particle import Particle
 
 # Screen dimensions
-screen_width = 1240
-screen_height = 800
+screen_width = 640
+screen_height = 480
 
 # Parameters for the simulation
 gravityY = 0  # 1500
@@ -28,7 +28,7 @@ RED = (255, 0, 0)
 GREEN = (0, 255, 0)
 
 # Some parameters for the particles
-numParticles = 196
+numParticles = 50
 sRadius = 40
 SVolume = math.pi * (sRadius**4) / 6
 BOXSize = [screen_width, screen_height]
@@ -54,7 +54,9 @@ class Simulation:
             self.AIControl = False
         else:
             self.AIControl = True
-
+            self.AI.eval()
+    
+    
     def confineToBox(self, particle, boxSize=BOXSize, eta=-1.0):
         if particle.position[0] > boxSize[0]:
             particle.position[0] = boxSize[0]
@@ -123,7 +125,9 @@ class Simulation:
             particle.velocity[1] += (particle.position[1] - samplePoint[1]) * strength
 
     def setup(self):
-        self.Particles = Particle.generateGridParticles(20, numParticles, BOXSize)
+        self.Particles = Particle.generateMaxwellBoltzmannParticles(numParticles, BOXSize, 5)
+        #Particle.plotVelocityDistribution(self.Particles)
+        #self.Particles = Particle.generateGridParticles(20, numParticles, BOXSize)
 
     def create_graph_data(self):
         particle_data = []
@@ -151,6 +155,34 @@ class Simulation:
 
         graph_data = Data(x=node_features, edge_index=edge_index, edge_attr=edge_attr, y=node_features)
         self.graphData.append(graph_data)
+        return graph_data
+
+    def create_graph_pairs(self):
+        self.graphPairs = []
+        for t in range(len(self.graphData) - 1):
+            x = self.graphData[t]
+            y = self.graphData[t + 1]
+            self.graphPairs.append(Data(x=x.x, edge_index=x.edge_index, edge_attr=x.edge_attr, y=y.x))
+
+    def AIToparticles(x_recon):
+        # Convert the tensor to a numpy array
+        particle_data = x_recon.cpu().numpy()
+        
+        # Initialize an empty list to store particles
+        particles = []
+        
+        # Iterate through the particle data and extract position and velocity
+        for i in range(particle_data.shape[0]):
+            position = particle_data[i, :2]  # First two columns are position (x, y)
+            velocity = particle_data[i, 2:]  # Last two columns are velocity (vx, vy)
+            particle = {
+                'position': position.tolist(),
+                'velocity': velocity.tolist()
+            }
+            particles.append(particle)
+        
+        return particles
+
 
     def update(self):
         if self.running_simulation:
@@ -163,6 +195,12 @@ class Simulation:
                 particle.predictedPosition[0] = particle.position[0] + particle.velocity[0]*dt
                 particle.predictedPosition[1] = particle.position[1] + particle.velocity[1]*dt
                 particle.density = self.calculateDensityAtPoint(self.Particles, particle.position, kdtree)
+
+
+            if self.AIControl and self.AI != None and len(self.graphData) >= 1:
+                graph_dataForAI = self.graphData[-1]
+                aiPrediction = self.AI(graph_dataForAI.X, graph_dataForAI.edge_index)
+                self.Particles = self.AIToparticles(aiPrediction)
 
             for idx, particle in enumerate(self.Particles):
                 pressureForce = self.calculatePressureAtPoint(self.Particles, particle.position, kdtree)
@@ -181,12 +219,17 @@ class Simulation:
                     particle.velocity[1] += gravityY * dt
                     particle.velocity[0] += gravityX * dt
                 else:
+                    pass
+                    #################YOUR CODE HERE #######################################
+
                     ## Add your code here or call a function here that acomplishes the task.
                     ## Input to the AI model can include the current state of the particles and the prvious states
                     ## The output of the model will be to give the new veloities of the particles after the elapsed time dt.
-                    predictedVelocity = self.AI(self.Particles)
-                    particle.velocity[0] -= predictedVelocity[idx][0]
-                    particle.velocity[1] -= predictedVelocity[idx][1]
+                    
+                    ## Feel free to move the the call to the self.AI function outside the loop if necessary to increase efficiency. 
+                    # predictedVelocity = self.AI(self.Particles)
+                    # particle.velocity[0] -= predictedVelocity[idx][0]
+                    # particle.velocity[1] -= predictedVelocity[idx][1]
 
             if self.recording and not self.AIControl:
                 self.inputToModel.append(inputForFrame)
@@ -194,8 +237,9 @@ class Simulation:
 
             self.maxAbsVel = 0
             for particle in self.Particles:
-                particle.position[0] += particle.velocity[0] * dt
-                particle.position[1] += particle.velocity[1] * dt
+                if not self.AIControl:
+                    particle.position[0] += particle.velocity[0] * dt
+                    particle.position[1] += particle.velocity[1] * dt
                 absVelocity = particle.velocity[0]**2 + particle.velocity[1]**2
                 if absVelocity > self.maxAbsVel:
                     self.maxAbsVel = absVelocity
@@ -203,9 +247,6 @@ class Simulation:
 
             if self.maxAbsVel == 0:
                self.maxAbsVel = 1 
-
-            for particle in self.Particles:
-                inputForFrame.append(particle.velocity[0]/(self.maxAbsVel**0.5))
 
             # Create graph data for the current frame
             self.create_graph_data()
@@ -229,12 +270,28 @@ class Simulation:
 
                     if event.key == pygame.K_a:
                         self.AIControl = not self.AIControl
-
+## LKM
                     if event.key == pygame.K_s:
+                        ## The following segment creates a data set that can be used by an auto encoder of sorts. 
+                        ## It saves a graph dataset with identical inputs and outputs/ 
+                        ## Each node represents a particle and has a the following properties:
+                        ## PosX, PosY, VexX, VelY
                         self.inputToModel = np.array(self.inputToModel)
                         self.outputToModel = np.array(self.outputToModel)
                         torch.save(self.graphData, "../Dataset/graph_dataset.pt")
+                        
+                        ## This segment creates a dataset similar to tha one above, but the input is the graph representation of a frame 
+                        ## at time t and the output is the graph representation at time t+1. Can again be used by an basic auto encoder.
+                        self.create_graph_pairs()
+                        torch.save(self.graphPairs, "../Dataset/graph_dataset_naive.pt")
 
+                        ## This segment creates the most basic dataset of them all. 
+                        ## Each input entry has the following structure:
+                        ## [gravityX, gravityY, targetDensity, pressureMultiplier, 
+                        ## particle1PosX, particle1PosY, particle1Vel1, particle1Vel2,
+                        ## particle2PosX, particle2PosY, particle2Vel1, particle2Vel2,
+                        ## .... In our case the number of particles are kept constant.
+                        ## ]
                         np.save("../Dataset/input.npy", self.inputToModel)
                         np.save("../Dataset/output.npy", self.outputToModel)
                         self.recording = False
@@ -263,7 +320,7 @@ class Simulation:
         print("W: start recording data")
         print("S: save the recorded data")
         print("press any key to continue")
-        input()
+        #input()
 
         if self.render:
             pygame.init()
@@ -278,5 +335,10 @@ class Simulation:
         sys.exit()
 
 if __name__ == "__main__":
+    ## This is to plot the original distribution of the speeds of the particles. 
+    ## Used to generate the graphs orginally.
+    # if False:
+    #     p = Particle.generateMaxwellBoltzmannParticles(10000, BOXSize, 4)
+    #     Particle.plotVelocityDistribution(p)
     simulation = Simulation()
     simulation.run()
