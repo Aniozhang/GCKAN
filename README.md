@@ -1,4 +1,4 @@
-# KAN + GAT
+# Kolmogorov Arnold Network (KAN) + Graph Attention Network (GAT)
 
 
 ## How to run the experiments
@@ -9,16 +9,16 @@
 * python simulation.py
 * Follow the on screen instructions to build your dataset. YOu may modify it by adding any type of Noise to the collected data.
 
-## Train the autoencoders
+### Train the autoencoders
 * cd Model
 * python main.py
 * This will train the autoencoders
 
-## Train the Intermidiate Models
+### Train the Intermidiate Models
 * python *modelName*.py
 
-## Testing the accuracies
+### Testing the accuracies
 * python testIntermidaiteModel.py
 * python testNaiveModel.py
 
-Repo for AAAI 2025 conference. 
+Repo for AAAI 2025 conference.
